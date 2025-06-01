@@ -41,13 +41,32 @@ export class TrendTradingService {
     ) {
         this.config = {
             enabled: this.configService.get<boolean>('trading.enabled', true),
-            takeProfitPercent: this.configService.get<number>('trading.takeProfitPercent', 3.0), // 3% для тренд-торговли
-            stopLossPercent: this.configService.get<number>('trading.stopLossPercent', 2.0), // 2%
-            maxPositionsPerSymbol: this.configService.get<number>('trading.maxPositionsPerSymbol', 2), // Больше позиций для тренда
+            takeProfitPercent: this.configService.get<number>('trading.takeProfitPercent', 3.0), // Фоллбэк
+            stopLossPercent: this.configService.get<number>('trading.stopLossPercent', 2.0), // Фоллбэк
+            maxPositionsPerSymbol: this.configService.get<number>('trading.maxPositionsPerSymbol', 2),
             maxTotalPositions: this.configService.get<number>('trading.maxTotalPositions', 20),
+            
+            // 🆕 НАСТРОЙКИ ДЛЯ АДАПТИВНОГО TP/SL
+            adaptive: {
+                enabled: this.configService.get<boolean>('trading.adaptive.enabled', true),
+                minStopLossPercent: this.configService.get<number>('trading.adaptive.minStopLossPercent', 0.5),
+                maxStopLossPercent: this.configService.get<number>('trading.adaptive.maxStopLossPercent', 5.0),
+                minTakeProfitPercent: this.configService.get<number>('trading.adaptive.minTakeProfitPercent', 1.0),
+                maxTakeProfitPercent: this.configService.get<number>('trading.adaptive.maxTakeProfitPercent', 15.0),
+                stopLossChannelFraction: this.configService.get<number>('trading.adaptive.stopLossChannelFraction', 0.3),
+                takeProfitChannelFraction: this.configService.get<number>('trading.adaptive.takeProfitChannelFraction', 0.8),
+                minRiskRewardRatio: this.configService.get<number>('trading.adaptive.minRiskRewardRatio', 1.5),
+            },
         };
 
-        this.logger.log(`Trend Trading Service инициализирован: TP=${this.config.takeProfitPercent}%, SL=${this.config.stopLossPercent}%`);
+        const mode = this.config.adaptive?.enabled ? 'АДАПТИВНЫЙ (на основе канала)' : 'ФИКСИРОВАННЫЙ';
+        this.logger.log(`Trend Trading Service инициализирован | Режим: ${mode}`);
+        
+        if (this.config.adaptive?.enabled) {
+            this.logger.log(`📊 Адаптивные настройки: SL=${this.config.adaptive.stopLossChannelFraction*100}% от канала, TP=${this.config.adaptive.takeProfitChannelFraction*100}% от канала, R/R≥1:${this.config.adaptive.minRiskRewardRatio}`);
+        } else {
+            this.logger.log(`📊 Фиксированные настройки: TP=${this.config.takeProfitPercent}%, SL=${this.config.stopLossPercent}%`);
+        }
     }
 
     /**
@@ -130,7 +149,7 @@ export class TrendTradingService {
     }
 
     /**
-     * 🎯 Создает LONG сигнал
+     * 🎯 Создает LONG сигнал с адаптивными TP/SL на основе ширины канала
      */
     private createLongSignal(pattern: TrendPattern, currentPrice: number): TradingSignal | null {
         if (!this.canOpenPosition(pattern.symbol)) {
@@ -138,17 +157,17 @@ export class TrendTradingService {
             return null;
         }
 
-        const takeProfitPrice = currentPrice * (1 + this.config.takeProfitPercent / 100);
-        const stopLossPrice = currentPrice * (1 - this.config.stopLossPercent / 100);
+        // 🎯 АДАПТИВНЫЙ РАСЧЕТ TP/SL НА ОСНОВЕ ШИРИНЫ КАНАЛА
+        const channelCalculation = this.calculateAdaptiveTPSL(pattern, currentPrice, 'LONG');
 
         const signal: TradingSignal = {
             symbol: pattern.symbol,
             direction: 'LONG',
             entryPrice: currentPrice,
             timestamp: Date.now(),
-            reason: `Тренд ${pattern.trendDirection} | LONG на уровне ${pattern.nextLevels.long.toFixed(6)} | Ступень: ${pattern.stepPercentage.toFixed(2)}%`,
-            takeProfitPrice: Number(takeProfitPrice.toFixed(8)),
-            stopLossPrice: Number(stopLossPrice.toFixed(8)),
+            reason: `Тренд ${pattern.trendDirection} | LONG на уровне ${pattern.nextLevels.long.toFixed(6)} | Канал: ${channelCalculation.channelWidthPercent.toFixed(2)}% | R/R: 1:${channelCalculation.riskRewardRatio.toFixed(1)}`,
+            takeProfitPrice: Number(channelCalculation.takeProfitPrice.toFixed(8)),
+            stopLossPrice: Number(channelCalculation.stopLossPrice.toFixed(8)),
             confirmation: {
                 btcTrend: true,
                 volumeProfile: true, // Не используем VP фильтр для тренд-стратегии
@@ -157,12 +176,13 @@ export class TrendTradingService {
         };
 
         this.logger.log(`🟢 LONG СИГНАЛ [${pattern.trendDirection}] ${pattern.symbol} на уровне ${pattern.nextLevels.long.toFixed(6)}`);
+        this.logger.log(`📊 Канал: ${channelCalculation.channelWidthPercent.toFixed(2)}% | TP: ${this.formatPrice(channelCalculation.takeProfitPrice)} | SL: ${this.formatPrice(channelCalculation.stopLossPrice)} | R/R: 1:${channelCalculation.riskRewardRatio.toFixed(1)}`);
 
         return signal;
     }
 
     /**
-     * 🎯 Создает SHORT сигнал
+     * 🎯 Создает SHORT сигнал с адаптивными TP/SL на основе ширины канала
      */
     private createShortSignal(pattern: TrendPattern, currentPrice: number): TradingSignal | null {
         if (!this.canOpenPosition(pattern.symbol)) {
@@ -170,17 +190,17 @@ export class TrendTradingService {
             return null;
         }
 
-        const takeProfitPrice = currentPrice * (1 - this.config.takeProfitPercent / 100);
-        const stopLossPrice = currentPrice * (1 + this.config.stopLossPercent / 100);
+        // 🎯 АДАПТИВНЫЙ РАСЧЕТ TP/SL НА ОСНОВЕ ШИРИНЫ КАНАЛА
+        const channelCalculation = this.calculateAdaptiveTPSL(pattern, currentPrice, 'SHORT');
 
         const signal: TradingSignal = {
             symbol: pattern.symbol,
             direction: 'SHORT',
             entryPrice: currentPrice,
             timestamp: Date.now(),
-            reason: `Тренд ${pattern.trendDirection} | SHORT на уровне ${pattern.nextLevels.short.toFixed(6)} | Ступень: ${pattern.stepPercentage.toFixed(2)}%`,
-            takeProfitPrice: Number(takeProfitPrice.toFixed(8)),
-            stopLossPrice: Number(stopLossPrice.toFixed(8)),
+            reason: `Тренд ${pattern.trendDirection} | SHORT на уровне ${pattern.nextLevels.short.toFixed(6)} | Канал: ${channelCalculation.channelWidthPercent.toFixed(2)}% | R/R: 1:${channelCalculation.riskRewardRatio.toFixed(1)}`,
+            takeProfitPrice: Number(channelCalculation.takeProfitPrice.toFixed(8)),
+            stopLossPrice: Number(channelCalculation.stopLossPrice.toFixed(8)),
             confirmation: {
                 btcTrend: true,
                 volumeProfile: true,
@@ -189,13 +209,93 @@ export class TrendTradingService {
         };
 
         this.logger.log(`🔴 SHORT СИГНАЛ [${pattern.trendDirection}] ${pattern.symbol} на уровне ${pattern.nextLevels.short.toFixed(6)}`);
+        this.logger.log(`📊 Канал: ${channelCalculation.channelWidthPercent.toFixed(2)}% | TP: ${this.formatPrice(channelCalculation.takeProfitPrice)} | SL: ${this.formatPrice(channelCalculation.stopLossPrice)} | R/R: 1:${channelCalculation.riskRewardRatio.toFixed(1)}`);
 
         return signal;
     }
 
     /**
-     * Открывает позицию по сигналу
+     * 🎯 КЛЮЧЕВОЙ МЕТОД: Рассчитывает адаптивные TP/SL на основе ширины канала
      */
+    private calculateAdaptiveTPSL(pattern: TrendPattern, entryPrice: number, direction: 'LONG' | 'SHORT'): {
+        takeProfitPrice: number;
+        stopLossPrice: number;
+        channelWidthPercent: number;
+        riskRewardRatio: number;
+        method: string;
+    } {
+        // 🎯 ВЫЧИСЛЯЕМ ШИРИНУ КАНАЛА между point1, point2, point3
+        const channelWidth = this.calculateChannelWidth(pattern);
+        const channelWidthPercent = (channelWidth / entryPrice) * 100;
+
+        // 🎯 НАСТРОЙКИ ДЛЯ АДАПТИВНОГО РАСЧЕТА
+        const settings = {
+            // Минимальные и максимальные размеры TP/SL
+            minStopLossPercent: 0.5,   // Минимум 0.5%
+            maxStopLossPercent: 5.0,   // Максимум 5%
+            minTakeProfitPercent: 1.0, // Минимум 1%
+            maxTakeProfitPercent: 15.0, // Максимум 15%
+            
+            // Коэффициенты для расчета от ширины канала
+            stopLossChannelFraction: 0.3,  // SL = 30% от ширины канала
+            takeProfitChannelFraction: 0.8, // TP = 80% от ширины канала
+            
+            // Минимальное соотношение Risk/Reward
+            minRiskRewardRatio: 1.5,
+        };
+
+        // 🎯 РАССЧИТЫВАЕМ СТОП-ЛОСС (% от ширины канала)
+        let stopLossPercent = channelWidthPercent * settings.stopLossChannelFraction;
+        stopLossPercent = Math.max(settings.minStopLossPercent, 
+                          Math.min(settings.maxStopLossPercent, stopLossPercent));
+
+        // 🎯 РАССЧИТЫВАЕМ ТЕЙК-ПРОФИТ (% от ширины канала)
+        let takeProfitPercent = channelWidthPercent * settings.takeProfitChannelFraction;
+        takeProfitPercent = Math.max(settings.minTakeProfitPercent, 
+                            Math.min(settings.maxTakeProfitPercent, takeProfitPercent));
+
+        // 🎯 ПРОВЕРЯЕМ И КОРРЕКТИРУЕМ RISK/REWARD RATIO
+        const currentRiskReward = takeProfitPercent / stopLossPercent;
+        if (currentRiskReward < settings.minRiskRewardRatio) {
+            // Увеличиваем TP для достижения минимального R/R
+            takeProfitPercent = stopLossPercent * settings.minRiskRewardRatio;
+            takeProfitPercent = Math.min(settings.maxTakeProfitPercent, takeProfitPercent);
+        }
+
+        // 🎯 ВЫЧИСЛЯЕМ ЦЕНЫ TP/SL
+        let takeProfitPrice: number;
+        let stopLossPrice: number;
+
+        if (direction === 'LONG') {
+            takeProfitPrice = entryPrice * (1 + takeProfitPercent / 100);
+            stopLossPrice = entryPrice * (1 - stopLossPercent / 100);
+        } else { // SHORT
+            takeProfitPrice = entryPrice * (1 - takeProfitPercent / 100);
+            stopLossPrice = entryPrice * (1 + stopLossPercent / 100);
+        }
+
+        const finalRiskReward = takeProfitPercent / stopLossPercent;
+
+        return {
+            takeProfitPrice,
+            stopLossPrice,
+            channelWidthPercent,
+            riskRewardRatio: finalRiskReward,
+            method: `Канал: ${channelWidthPercent.toFixed(2)}% → SL: ${stopLossPercent.toFixed(2)}% | TP: ${takeProfitPercent.toFixed(2)}%`
+        };
+    }
+
+    /**
+     * 🎯 Вычисляет ширину канала между тремя точками тренда
+     */
+    private calculateChannelWidth(pattern: TrendPattern): number {
+        const prices = [pattern.point1.price, pattern.point2.price, pattern.point3.price];
+        const maxPrice = Math.max(...prices);
+        const minPrice = Math.min(...prices);
+        
+        // Ширина канала = разница между максимальной и минимальной ценой
+        return maxPrice - minPrice;
+    }
     openPosition(signal: TradingSignal): TradingPosition {
         const position: TradingPosition = {
             id: uuidv4(),

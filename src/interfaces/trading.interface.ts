@@ -71,8 +71,25 @@ export interface TradingStats {
 
 export interface TradingConfig {
   enabled: boolean;
-  takeProfitPercent: number; // Процент тейк-профита от цены входа
-  stopLossPercent: number; // Процент стоп-лосса от цены входа (должен быть равен takeProfitPercent)
+  takeProfitPercent: number; // Процент тейк-профита от цены входа (фоллбэк)
+  stopLossPercent: number; // Процент стоп-лосса от цены входа (фоллбэк)
   maxPositionsPerSymbol: number;
   maxTotalPositions: number;
+  
+  // 🆕 НАСТРОЙКИ ДЛЯ АДАПТИВНОГО TP/SL НА ОСНОВЕ КАНАЛА
+  adaptive?: {
+    enabled: boolean; // Включить адаптивный расчет
+    // Минимальные и максимальные размеры TP/SL
+    minStopLossPercent: number;   // Минимум SL %
+    maxStopLossPercent: number;   // Максимум SL %
+    minTakeProfitPercent: number; // Минимум TP %
+    maxTakeProfitPercent: number; // Максимум TP %
+    
+    // Коэффициенты для расчета от ширины канала
+    stopLossChannelFraction: number;  // SL = X% от ширины канала
+    takeProfitChannelFraction: number; // TP = X% от ширины канала
+    
+    // Минимальное соотношение Risk/Reward
+    minRiskRewardRatio: number;
+  };
 }
