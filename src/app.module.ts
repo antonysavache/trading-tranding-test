@@ -4,6 +4,7 @@ import { ScheduleModule } from '@nestjs/schedule';
 import { AppController } from './app.controller';
 import { AppService } from './app.service';
 import { TradingController } from './controllers/trading.controller';
+import { TrendTradingController } from './controllers/trend-trading.controller';
 import { DataModule } from './modules/data/data.module';
 import { AnalysisModule } from './modules/analysis/analysis.module';
 import { SignalModule } from './modules/signal/signal.module';
@@ -24,7 +25,7 @@ import appConfig from './config/app.config';
     SignalModule,
     TradingModule,
   ],
-  controllers: [AppController, TradingController],
+  controllers: [AppController, TradingController, TrendTradingController],
   providers: [AppService],
 })
 export class AppModule {}
