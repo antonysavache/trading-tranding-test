@@ -19,15 +19,10 @@ async function bootstrap() {
     // Настройка CORS если нужно
     app.enableCors();
 
-    const port = process.env.PORT || 3004;
+    const port = process.env.PORT || 3005;
     await app.listen(port);
 
-    if (process.env.RAILWAY_ENVIRONMENT) {
-      logger.log(`Приложение запущено в Railway на порту ${port}`);
-      logger.log('Внешний URL доступен в Railway Dashboard');
-    } else {
-      logger.log(`Приложение запущено на http://localhost:${port}`);
-    }
+    logger.log(`Приложение запущено на http://localhost:${port}`);
     logger.log('Анализатор криптовалютных боковиков готов к работе');
   } catch (error) {
     logger.error('Ошибка запуска приложения:', error);

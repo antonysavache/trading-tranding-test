@@ -1,99 +1,230 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Торговый Бот с Google Sheets Интеграцией
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Этот проект представляет собой торговый бот для анализа криптовалютных рынков с автоматическим сохранением торговых сигналов в Google Sheets.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+## 🚀 Возможности
 
-## Description
+- **Анализ боковых движений** - автоматическое определение паттернов "боковик"
+- **Торговые сигналы** - генерация торговых сигналов на основе анализа
+- **Google Sheets интеграция** - автоматическое сохранение всех сигналов и результатов
+- **Volume Profile анализ** - анализ объемного профиля
+- **BTC тренд анализ** - фильтрация сигналов по тренду Bitcoin
+- **Order Book анализ** - анализ книги ордеров для подтверждения сигналов
+- **REST API** - создание сигналов через HTTP API
+- **WebSocket мониторинг** - реальное время данных с Binance
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## 📊 Структура Google Sheets
 
-## Project setup
+Проект автоматически сохраняет данные в Google Таблицу со следующей структурой:
 
-```bash
-$ npm install
-```
+### Лист "trades"
+| Колонка | Описание |
+|---------|----------|
+| date | Дата сигнала (YYYY-MM-DD) |
+| symbol | Торговая пара (например, BTCUSDT) |
+| VP | Подтверждение по Volume Profile (true/false) |
+| BTC | Подтверждение по тренду BTC (true/false) |
+| Order Book | Подтверждение по стакану ордеров (true/false) |
+| open | Цена входа в позицию |
+| side | Направление сделки (long/short) |
+| tp | Цена Take Profit |
+| sl | Цена Stop Loss |
+| result | Результат в процентах (заполняется при закрытии) |
 
-## Compile and run the project
+### Лист "logs"
+| Колонка | Описание |
+|---------|----------|
+| timestamp | Время события |
+| message | Сообщение лога |
 
-```bash
-# development
-$ npm run start
+## 🛠 Установка и настройка
 
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
-## Run tests
+### 1. Установка зависимостей
 
 ```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+npm install
 ```
 
-## Deployment
+### 2. Настройка Google Sheets
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+1. Создайте проект в [Google Cloud Console](https://console.cloud.google.com/)
+2. Включите Google Sheets API
+3. Создайте Service Account и загрузите JSON ключ
+4. Создайте Google Таблицу с листами "trades" и "logs"
+5. Поделитесь таблицей с email Service Account
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+### 3. Переменные окружения
+
+Создайте файл `.env`:
+
+```env
+# Google Sheets
+GOOGLE_SHEETS_CREDENTIALS={"type":"service_account","project_id":"..."}
+GOOGLE_SHEETS_TRADING_SPREADSHEET_ID=your_spreadsheet_id
+GOOGLE_SHEETS_ENABLED=true
+
+# Trading
+TRADING_ENABLED=true
+TRADING_TAKE_PROFIT_PERCENT=2.0
+TRADING_STOP_LOSS_PERCENT=2.0
+TRADING_MAX_POSITIONS_PER_SYMBOL=1
+TRADING_MAX_TOTAL_POSITIONS=10
+
+# Server
+API_PORT=3000
+WS_PORT=3001
+```
+
+### 4. Запуск
 
 ```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+# Разработка
+npm run start:dev
+
+# Продакшн
+npm run build
+npm run start:prod
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+## 📡 API Endpoints
 
-## Resources
+### Создание торгового сигнала
+```http
+POST /signals
+Content-Type: application/json
 
-Check out a few resources that may come in handy when working with NestJS:
+{
+  "symbol": "BTCUSDT",
+  "VP": true,
+  "BTC": true,
+  "orderBook": false,
+  "open": 45000,
+  "side": "long",
+  "tp": 45900,
+  "sl": 44100,
+  "sheetName": "trades"
+}
+```
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+### Создание множественных сигналов
+```http
+POST /signals/multiple
+Content-Type: application/json
 
-## Support
+{
+  "signals": [
+    {
+      "symbol": "BTCUSDT",
+      "VP": true,
+      "BTC": true,
+      "orderBook": false,
+      "open": 45000,
+      "side": "long",
+      "tp": 45900,
+      "sl": 44100
+    }
+  ],
+  "sheetName": "trades"
+}
+```
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+### Обновление результата сигнала
+```http
+POST /signals/update-result
+Content-Type: application/json
 
-## Stay in touch
+{
+  "date": "2024-01-01",
+  "symbol": "BTCUSDT",
+  "VP": true,
+  "BTC": true,
+  "orderBook": false,
+  "open": 45000,
+  "side": "long",
+  "tp": 45900,
+  "sl": 44100,
+  "result": 2.5,
+  "sheetName": "trades"
+}
+```
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+### Получение статуса
+```http
+GET /
+```
 
-## License
+## 🔄 Автоматическое сохранение
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
-# trading-tranding-test
+Бот автоматически сохраняет данные в Google Sheets:
+
+1. **При открытии позиции** - создается запись с торговым сигналом
+2. **При закрытии позиции** - обновляется результат в процентах
+3. **При логировании событий** - сохраняются важные события в лист "logs"
+
+## 📈 Торговая логика
+
+1. **Анализ боковых движений**: Поиск паттернов "максимум → минимум → максимум"
+2. **Volume Profile**: Подтверждение сигнала по объемному профилю
+3. **BTC тренд**: Фильтрация сигналов по направлению тренда Bitcoin
+4. **Order Book**: Анализ глубины рынка для подтверждения
+5. **Risk Management**: Автоматическое управление рисками с TP/SL
+
+## 🏗 Архитектура
+
+```
+src/
+├── shared/                    # Общие компоненты
+│   ├── models/               # Интерфейсы данных
+│   ├── services/             # Google Sheets и логирование
+│   └── repository.ts         # Репозиторий данных
+├── modules/
+│   ├── signal/               # Модуль торговых сигналов
+│   ├── trading/              # Торговая логика
+│   ├── analysis/             # Анализ данных
+│   └── data/                 # Источники данных
+└── interfaces/               # TypeScript интерфейсы
+```
+
+## 🔧 Настройка торговли
+
+В файле `.env` можно настроить параметры торговли:
+
+- `TRADING_TAKE_PROFIT_PERCENT` - процент тейк-профита
+- `TRADING_STOP_LOSS_PERCENT` - процент стоп-лосса
+- `TRADING_MAX_POSITIONS_PER_SYMBOL` - максимум позиций на символ
+- `TRADING_MAX_TOTAL_POSITIONS` - общий лимит позиций
+
+## 📊 Мониторинг
+
+Бот предоставляет подробную статистику:
+
+- Количество найденных боковиков
+- Статистика торговли (win rate, PnL)
+- Активные позиции
+- Статус BTC тренда
+- Буферы данных
+
+## 🚨 Безопасность
+
+- Все данные сохраняются в защищенных Google Sheets
+- Service Account для безопасного доступа к API
+- Никаких торговых ключей в коде
+- Только анализ и логирование сигналов
+
+## 📚 Документация
+
+Дополнительную документацию по интеграции с Google Sheets смотрите в файле `GOOGLE_SHEETS_INTEGRATION.md`.
+
+## 🤝 Поддержка
+
+При возникновении проблем:
+
+1. Проверьте правильность настройки Google Sheets
+2. Убедитесь в корректности переменных окружения
+3. Проверьте логи приложения
+4. Убедитесь в доступности Google Sheets API
+
+## 📄 Лицензия
+
+MIT License
+# trading-test

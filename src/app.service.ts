@@ -1,214 +1,250 @@
-import {Injectable, Logger, OnModuleInit} from '@nestjs/common';
-import {Cron, CronExpression} from '@nestjs/schedule';
-import {BinanceService} from './modules/data/binance.service';
-import {DataBufferService} from './modules/data/data-buffer.service';
-import {WebSocketManagerService} from './modules/data/websocket-manager.service';
-import {PriceAnalysisService} from './modules/analysis/price-analysis.service';
-import {TrendAnalysisService} from './modules/analysis/trend-analysis.service';
-import {TradingService} from './modules/trading/trading.service';
-import {TrendTradingService} from './modules/trading/trend-trading.service';
-import {LoggingService} from './shared';
-import {KlineData} from './interfaces/kline.interface';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import { Cron, CronExpression } from '@nestjs/schedule';
+import { BinanceService } from './modules/data/binance.service';
+import { DataBufferService } from './modules/data/data-buffer.service';
+import { WebSocketManagerService } from './modules/data/websocket-manager.service';
+import { PriceAnalysisService } from './modules/analysis/price-analysis.service';
+import { VirtualTradingService } from './modules/trading/virtual-trading.service';
+import { KlineData } from './interfaces/kline.interface';
 
 @Injectable()
 export class AppService implements OnModuleInit {
-    private readonly logger = new Logger(AppService.name);
-    private isInitialized = false;
-    private symbols: string[] = [];
+  private readonly logger = new Logger(AppService.name);
+  private isInitialized = false;
+  private symbols: string[] = [];
 
-    constructor(
-        private binanceService: BinanceService,
-        private dataBufferService: DataBufferService,
-        private webSocketManagerService: WebSocketManagerService,
-        private priceAnalysisService: PriceAnalysisService,
-        private trendAnalysisService: TrendAnalysisService,
-        private tradingService: TradingService,
-        private trendTradingService: TrendTradingService,
-        private loggingService: LoggingService,
-    ) {
+  constructor(
+    private binanceService: BinanceService,
+    private dataBufferService: DataBufferService,
+    private webSocketManagerService: WebSocketManagerService,
+    private priceAnalysisService: PriceAnalysisService,
+    private virtualTradingService: VirtualTradingService, // Добавляем торговый сервис
+  ) {}
+
+  async onModuleInit() {
+    try {
+      await this.initializeApplication();
+    } catch (error) {
+      this.logger.error('Ошибка инициализации приложения:', error.message);
+      throw error;
     }
+  }
 
-    async onModuleInit() {
-        try {
-            await this.initializeApplication();
-        } catch (error) {
-            this.logger.error('Ошибка инициализации приложения:', error.message);
-            throw error;
-        }
+  private async initializeApplication(): Promise<void> {
+    this.logger.log('Инициализация анализатора боковиков (5-минутные свечи)...');
+
+    // Получаем список всех торговых пар USDT
+    const tradingPairs = await this.binanceService.getTopTradingPairs();
+    this.symbols = tradingPairs.map(pair => pair.symbol);
+
+    this.logger.log(`Анализатор запущен: отслеживается ${this.symbols.length} символов`);
+
+    // Подписываемся на WebSocket потоки используя multi-stream подключения
+    this.webSocketManagerService.subscribeToMultipleKlines(
+      this.symbols,
+      (kline: KlineData) => this.handleKlineData(kline),
+      (error: Error) => this.handleKlineError(error)
+    );
+
+    this.isInitialized = true;
+    this.logger.log('Анализатор боковиков успешно запущен');
+  }
+
+  private async handleKlineData(kline: KlineData): Promise<void> {
+    try {
+      // Добавляем свечу в буфер
+      this.dataBufferService.addKline(kline);
+
+      // НОВОЕ: Обрабатываем свечу для торговых позиций
+      await this.priceAnalysisService.processKlineForTrading(kline);
+
+      // Логируем каждую 20-ю свечу для отслеживания активности (реже для 5m)
+      if (Math.random() < 0.05) { // 5% вероятность = примерно каждые 20 свечей
+        this.logger.debug(`📊 Обработана 5m свеча: ${kline.symbol} по цене ${parseFloat(kline.close).toFixed(4)}`);
+      }
+
+      // Проверяем, достаточно ли данных для качественного анализа (для 5-минутных свечей)
+      if (!this.dataBufferService.hasEnoughData(kline.symbol, 20)) { // Нужно минимум 20 свечей (100 минут)
+        return;
+      }
+
+      // Получаем свечи для анализа
+      const klines = this.dataBufferService.getKlines(kline.symbol);
+      
+      // Анализируем на предмет боковиков
+      const patterns = await this.priceAnalysisService.analyzeKlines(klines);
+      
+      // Логируем найденные боковики
+      for (const pattern of patterns) {
+        const direction = pattern.direction === 'high_to_low_to_high' ? 'возврат к максимуму' : 'возврат к минимуму';
+        this.logger.log(`🔄 БОКОВИК НАЙДЕН: ${pattern.symbol} | ${direction} | Ширина: ${pattern.channelWidthPercent.toFixed(2)}%`);
+      }
+
+    } catch (error) {
+      this.logger.error(`Ошибка обработки kline для ${kline.symbol}: ${error.message}`);
     }
+  }
 
-    private async initializeApplication(): Promise<void> {
-        this.logger.log('Инициализация анализатора боковиков...');
+  private handleKlineError(error: Error): void {
+    this.logger.error('Ошибка WebSocket:', error.message);
+  }
 
-        // Получаем список всех торговых пар USDT
-        const tradingPairs = await this.binanceService.getTopTradingPairs();
-        this.symbols = tradingPairs.map(pair => pair.symbol);
+  private logActiveMovements(): void {
+    if (!this.isInitialized) return;
 
-        // 🔥 ВАЖНО: Убеждаемся что BTCUSDT всегда включен для BTC тренд анализа
-        if (!this.symbols.includes('BTCUSDT')) {
-            this.symbols.unshift('BTCUSDT'); // Добавляем в начало списка
-            this.logger.log('🔧 BTCUSDT добавлен для анализа BTC тренда');
-        }
+    const activeMovements = this.priceAnalysisService.getActiveMovements();
+    const bufferStats = this.dataBufferService.getBufferStats();
+    const tradingStats = this.virtualTradingService.getTradingStats();
+    
+    // Логируем общую статистику включая торговлю
+    this.logger.log(
+      `📊 АКТИВНОСТЬ: Движений в процессе: ${activeMovements.size} | ` +
+      `Активных позиций: ${tradingStats.activePosсitions} | ` +
+      `Всего сделок: ${tradingStats.totalTrades} | ` +
+      `Баланс: ${this.virtualTradingService.getVirtualBalance().toFixed(2)} USDT`
+    );
+    
+    // Если есть активные движения, показываем детали
+    if (activeMovements.size > 0) {
+      const details: string[] = [];
+      for (const [symbol, movement] of activeMovements) {
+        const pointsCount = movement.points.length;
+        const lastPoint = movement.points[movement.points.length - 1];
+        const status = movement.status;
+        details.push(`${symbol}(${pointsCount}точек,${status})`);
+      }
+      
+      // Показываем только первые 10, чтобы не спамить
+      const displayDetails = details.slice(0, 10);
+      if (details.length > 10) {
+        displayDetails.push(`...и еще ${details.length - 10}`);
+      }
+      
+      this.logger.log(`🔍 Активные движения: ${displayDetails.join(', ')}`);
+    }
+  }
 
-        // Логируем запуск
-        this.loggingService.info(
-            `Анализатор запущен: отслеживается ${this.symbols.length} символов`,
-            'AppService'
+  @Cron(CronExpression.EVERY_MINUTE)
+  handleMinuteAnalysis(): void {
+    if (this.isInitialized) {
+      this.logActiveMovements();
+      this.logTradingStatistics(); // Добавляем логирование торговой статистики каждую минуту
+    }
+  }
+
+  // НОВОЕ: Логирование торговой статистики каждую минуту
+  private logTradingStatistics(): void {
+    const detailedStats = this.virtualTradingService.getDetailedTradingStats();
+    
+    if (detailedStats.totalTrades > 0 || detailedStats.activePosсitions > 0) {
+      this.logger.log(
+        `💰 ТОРГОВАЯ СТАТИСТИКА (1 мин) | ` +
+        `Баланс: ${detailedStats.balance.toFixed(2)} USDT | ` +
+        `Дневной PnL: ${detailedStats.dailyPnl >= 0 ? '+' : ''}${detailedStats.dailyPnl.toFixed(2)} USDT | ` +
+        `Дневной ROI: ${detailedStats.dailyROI >= 0 ? '+' : ''}${detailedStats.dailyROI.toFixed(2)}% | ` +
+        `Общий ROI: ${detailedStats.totalROI >= 0 ? '+' : ''}${detailedStats.totalROI.toFixed(2)}%`
+      );
+      
+      this.logger.log(
+        `📊 ДЕТАЛИ | ` +
+        `Сделок: ${detailedStats.totalTrades} | ` +
+        `Активных: ${detailedStats.activePosсitions} | ` +
+        `Винрейт: ${detailedStats.winRate.toFixed(1)}% | ` +
+        `Комиссии: ${detailedStats.totalFees.toFixed(2)} USDT | ` +
+        `Чистый PnL: ${detailedStats.netPnl >= 0 ? '+' : ''}${detailedStats.netPnl.toFixed(2)} USDT`
+      );
+    } else {
+      // Если еще нет сделок, показываем только баланс
+      this.logger.log(
+        `💰 ТОРГОВАЯ СТАТИСТИКА | ` +
+        `Баланс: ${detailedStats.balance.toFixed(2)} USDT | ` +
+        `Ожидание первых сделок...`
+      );
+    }
+  }
+
+  @Cron(CronExpression.EVERY_5_MINUTES)
+  handleTradingStatistics(): void {
+    if (this.isInitialized) {
+      const detailedStats = this.virtualTradingService.getDetailedTradingStats();
+      const activePositions = this.virtualTradingService.getActivePositions();
+      
+      if (detailedStats.totalTrades > 0) {
+        this.logger.log(
+          `📈 РАСШИРЕННАЯ СТАТИСТИКА (5 мин) | ` +
+          `Всего сделок: ${detailedStats.totalTrades} | ` +
+          `Выигрышных: ${detailedStats.winningTrades} | ` +
+          `Проигрышных: ${detailedStats.losingTrades} | ` +
+          `Винрейт: ${detailedStats.winRate.toFixed(1)}%`
         );
-
-        // Подписываемся на WebSocket потоки используя multi-stream подключения
-        this.webSocketManagerService.subscribeToMultipleKlines(
-            this.symbols,
-            (kline: KlineData) => this.handleKlineData(kline),
-            (error: Error) => this.handleKlineError(error)
+        
+        this.logger.log(
+          `💵 ФИНАНСОВЫЕ ПОКАЗАТЕЛИ | ` +
+          `Средний выигрыш: ${detailedStats.averageWin.toFixed(2)} USDT | ` +
+          `Средний проигрыш: ${detailedStats.averageLoss.toFixed(2)} USDT | ` +
+          `Профит-фактор: ${detailedStats.profitFactor.toFixed(2)} | ` +
+          `Общие комиссии: ${detailedStats.totalFees.toFixed(2)} USDT`
         );
+      }
 
-        this.isInitialized = true;
-        this.logger.log('Анализатор боковиков успешно запущен');
+      // Показываем активные позиции если есть
+      if (activePositions.length > 0) {
+        const positionsList = activePositions
+          .slice(0, 5) // Показываем только первые 5
+          .map(pos => `${pos.symbol}(${pos.side})`)
+          .join(', ');
+        
+        this.logger.log(
+          `🔥 АКТИВНЫЕ ПОЗИЦИИ (${activePositions.length}): ${positionsList}${
+            activePositions.length > 5 ? `...и еще ${activePositions.length - 5}` : ''
+          }`
+        );
+      }
     }
+  }
 
-    private async handleKlineData(kline: KlineData): Promise<void> {
-        try {
-            // Добавляем свечу в буфер
-            this.dataBufferService.addKline(kline);
-
-            // 🔥 ВАЖНО: Обновляем BTC тренд если это BTCUSDT
-            if (kline.symbol === 'BTCUSDT') {
-                this.trendTradingService['btcTrendService']?.updateBTCPrice(kline);
-            }
-
-            // Обновляем торговые позиции по текущей цене
-            const currentPrice = parseFloat(kline.close);
-            this.trendTradingService.updatePositions(kline.symbol, currentPrice);
-
-            // Проверяем, достаточно ли данных для анализа (для минутных свечей нужно меньше)
-            if (!this.dataBufferService.hasEnoughData(kline.symbol, 10)) {
-                return;
-            }
-
-            // Получаем свечи для анализа
-            const klines = this.dataBufferService.getKlines(kline.symbol);
-
-            // 🎯 НОВЫЙ АНАЛИЗ: Анализируем на предмет ТРЕНДОВ
-            const trendPatterns = this.trendAnalysisService.analyzeKlines(klines);
-
-            // Обрабатываем найденные тренды
-            for (const trendPattern of trendPatterns) {
-                this.logger.log(`📈 ТРЕНД НАЙДЕН: ${trendPattern.symbol} | ${trendPattern.trendDirection}`);
-
-                // Логируем в Google Sheets
-                this.loggingService.info(
-                    `Тренд найден: ${trendPattern.symbol} | ${trendPattern.trendDirection} | Ступень: ${trendPattern.stepPercentage.toFixed(2)}%`,
-                    'AppService'
-                );
-
-                // Создаем торговые сигналы для тренда
-                const trendSignals = await this.trendTradingService.processTrendPattern(trendPattern, currentPrice);
-
-                for (const signal of trendSignals) {
-                    const position = this.trendTradingService.openPosition(signal);
-                    this.logger.log(`💼 ТРЕНД СДЕЛКА ОТКРЫТА: ${position.symbol} ${position.direction}`);
-                }
-            }
-
-        } catch (error) {
-            this.logger.error(`Ошибка обработки kline для ${kline.symbol}: ${error.message}`);
-            this.loggingService.error(`${kline.symbol}: ${error.message}`, 'AppService');
-        }
+  @Cron(CronExpression.EVERY_10_MINUTES)
+  handleHealthCheck(): void {
+    if (this.isInitialized) {
+      const activeMovements = this.priceAnalysisService.getActiveMovements();
+      const balance = this.virtualTradingService.getVirtualBalance();
+      
+      this.logger.log(`💊 ЗДОРОВЬЕ: Движений: ${activeMovements.size} | Баланс: ${balance.toFixed(2)} USDT`);
     }
+  }
 
-    private handleKlineError(error: Error): void {
-        this.logger.error('Ошибка WebSocket:', error.message);
-    }
+  getHello(): string {
+    return 'Анализатор криптовалютных боковиков с торговлей запущен!';
+  }
 
-    private logActiveMovements(): void {
-        // Убрали частые логи активных движений - оставляем только боковики
-        // Активные движения будут показываться только при нахождении боковика
-    }
+  getStatus(): any {
+    const activeMovements = this.priceAnalysisService.getActiveMovements();
+    const tradingStats = this.virtualTradingService.getTradingStats();
+    const activePositions = this.virtualTradingService.getActivePositions();
+    
+    return {
+      initialized: this.isInitialized,
+      trackedSymbols: this.symbols.length,
+      bufferStats: this.dataBufferService.getBufferStats(),
+      activeMovements: activeMovements.size,
+      trading: {
+        enabled: true,
+        balance: this.virtualTradingService.getVirtualBalance(),
+        activePositions: activePositions.length,
+        totalTrades: tradingStats.totalTrades,
+        winRate: tradingStats.winRate,
+        totalPnl: tradingStats.totalPnl,
+      },
+    };
+  }
 
-    private lastMovementLogTime = 0;
+  // НОВОЕ: Метод для получения торговой статистики
+  getTradingStats() {
+    return this.virtualTradingService.getTradingStats();
+  }
 
-    private getLastMovementLogTime(): number {
-        return this.lastMovementLogTime;
-    }
-
-    private setLastMovementLogTime(time: number): void {
-        this.lastMovementLogTime = time;
-    }
-
-    @Cron(CronExpression.EVERY_MINUTE)
-    handleMinuteAnalysis(): void {
-        if (this.isInitialized) {
-            this.logActiveMovements();
-        }
-    }
-
-    @Cron(CronExpression.EVERY_MINUTE)
-    handleStatistics(): void {
-        if (this.isInitialized) {
-            // Статистика тренд-торговли
-            const trendStats = this.trendTradingService.getTradingStats();
-            if (trendStats.closedTrades > 0) {
-                this.logger.log(`📊 ТРЕНД Статистика: Сделок ${trendStats.closedTrades} | Win Rate: ${trendStats.winRate.toFixed(1)}%`);
-            }
-        }
-    }
-
-    @Cron(CronExpression.EVERY_10_MINUTES)
-    handleHealthCheck(): void {
-        if (this.isInitialized) {
-            const activeTrendMovements = this.trendAnalysisService.getActiveTrendMovements();
-
-            // Только важная информация без спама
-            if (activeTrendMovements.size > 0) {
-                this.logger.log(`Активных трендовых движений: ${activeTrendMovements.size}`);
-            }
-        }
-    }
-
-    getHello(): string {
-        return '🎯 ТРЕНД-СКРИНЕР криптовалют запущен!';
-    }
-
-    getStatus(): any {
-        const trendStats = this.trendTradingService.getTradingStats();
-        const openPositions = this.trendTradingService.getOpenPositions();
-        const btcTrendAnalysis = this.trendTradingService['btcTrendService']?.getBTCTrendAnalysis();
-
-        return {
-            initialized: this.isInitialized,
-            strategy: 'TREND_TRADING',
-            trackedSymbols: this.symbols.length,
-            btcIncluded: this.symbols.includes('BTCUSDT'),
-            bufferStats: this.dataBufferService.getBufferStats(),
-            activeTrendMovements: this.trendAnalysisService.getActiveTrendMovements().size,
-            btcTrend: btcTrendAnalysis ? {
-                trend: btcTrendAnalysis.trend,
-                ready: this.trendTradingService['btcTrendService']?.isReady() || false,
-                ema20: btcTrendAnalysis.ema20?.toFixed(2),
-                ema50: btcTrendAnalysis.ema50?.toFixed(2),
-            } : {
-                trend: 'NOT_INITIALIZED',
-                ready: false,
-            },
-            trendTrading: {
-                stats: trendStats,
-                openPositions: openPositions.length,
-                recentPositions: openPositions.slice(-5).map(pos => ({
-                    symbol: pos.symbol,
-                    direction: pos.direction,
-                    pnl: pos.unrealizedPnl.toFixed(2) + '%',
-                    entryPrice: pos.entryPrice,
-                    currentPrice: pos.currentPrice,
-                    confirmation: pos.confirmation ? {
-                        btcTrend: pos.confirmation.btcTrend,
-                        volumeProfile: pos.confirmation.volumeProfile,
-                        overall: pos.confirmation.overall,
-                        icon: pos.confirmation.overall ? '🟢' : '🟡',
-                        status: pos.confirmation.overall ? 'ПОЛНОЕ' : 'ЧАСТИЧНОЕ',
-                    } : null,
-                })),
-            },
-        };
-    }
+  // НОВОЕ: Метод для получения активных позиций  
+  getActivePositions() {
+    return this.virtualTradingService.getActivePositions();
+  }
 }
