@@ -87,8 +87,14 @@ export class PriceAnalysisService {
           `${marketFilter.reason}`
         );
         
-        // Отправляем паттерн в торговый модуль БЕЗ фильтров (как раньше)
-        await this.virtualTradingService.processPattern(completedPattern, currentPrice);
+        // Отправляем паттерн в торговый модуль БЕЗ фильтров, но С информацией о них
+        await this.virtualTradingService.processPattern(completedPattern, currentPrice, {
+          trendDirection: trendAnalysis.direction,
+          trendStrength: trendAnalysis.strength,
+          allowLong: marketFilter.allowLong,
+          allowShort: marketFilter.allowShort,
+          reason: marketFilter.reason,
+        });
       } catch (error) {
         this.logger.warn(`${symbol}: Ошибка анализа фильтров: ${error.message}`);
         // Если фильтры не работают - продолжаем торговать как раньше

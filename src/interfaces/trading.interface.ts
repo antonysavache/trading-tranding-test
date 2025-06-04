@@ -24,6 +24,13 @@ export interface TradeSignal {
   reason: string;
   takeProfit: number;
   stopLoss: number;
+  filters?: {
+    trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    trendStrength: number;
+    allowLong: boolean;
+    allowShort: boolean;
+    reason: string;
+  };
 }
 
 export interface TradingConfig {

@@ -36,7 +36,13 @@ export class VirtualTradingService {
   }
 
   // Обработка найденного боковика - сохранение канала для торговли
-  async processPattern(pattern: SidewaysPattern, currentPrice: number): Promise<void> {
+  async processPattern(pattern: SidewaysPattern, currentPrice: number, filterInfo?: {
+    trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    trendStrength: number;
+    allowLong: boolean;
+    allowShort: boolean;
+    reason: string;
+  }): Promise<void> {
     if (!this.enabled) return;
 
     try {
@@ -50,20 +56,26 @@ export class VirtualTradingService {
       );
 
       // Проверяем, можем ли мы сразу войти в сделку
-      await this.checkForTradeEntry(pattern.symbol, currentPrice);
+      await this.checkForTradeEntry(pattern.symbol, currentPrice, filterInfo);
     } catch (error) {
       this.logger.error(`❌ Ошибка обработки паттерна ${pattern.symbol}: ${error.message}`);
     }
   }
 
   // Проверка возможности входа в сделку по активному каналу
-  private async checkForTradeEntry(symbol: string, currentPrice: number): Promise<void> {
+  private async checkForTradeEntry(symbol: string, currentPrice: number, filterInfo?: {
+    trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    trendStrength: number;
+    allowLong: boolean;
+    allowShort: boolean;
+    reason: string;
+  }): Promise<void> {
     const channel = this.activeChannels.get(symbol);
     if (!channel) return;
 
     // Проверяем, что цена достаточно близко к границе канала для входа
     if (this.isNearChannelBoundary(channel, currentPrice)) {
-      const signal = this.createTradeSignal(channel, currentPrice);
+      const signal = this.createTradeSignal(channel, currentPrice, filterInfo);
       
       // Входим БЕЗ проверки фильтров (фильтры только для статистики)
       await this.executeSignal(signal, currentPrice);
@@ -71,7 +83,13 @@ export class VirtualTradingService {
   }
 
   // Создание торгового сигнала на основе боковика
-  private createTradeSignal(pattern: SidewaysPattern, currentPrice: number): TradeSignal {
+  private createTradeSignal(pattern: SidewaysPattern, currentPrice: number, filterInfo?: {
+    trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    trendStrength: number;
+    allowLong: boolean;
+    allowShort: boolean;
+    reason: string;
+  }): TradeSignal {
     // Определяем направление сделки (отскок от уровня)
     const direction = this.getTradeDirection(pattern, currentPrice);
     
@@ -116,6 +134,7 @@ export class VirtualTradingService {
       reason: `Отскок от ${direction === 'LONG' ? 'нижней' : 'верхней'} границы боковика`,
       takeProfit,
       stopLoss,
+      filters: filterInfo,
     };
   }
 
@@ -195,13 +214,22 @@ export class VirtualTradingService {
     this.virtualBalance -= openFee;
     this.totalFeespaid += openFee;
 
+    // Формируем строку с информацией о фильтрах
+    let filterInfo = '';
+    if (signal.filters) {
+      const filters = signal.filters;
+      filterInfo = ` | Тренд: ${filters.trendDirection} (${filters.trendStrength.toFixed(1)}%) | ` +
+                  `LONG=${filters.allowLong ? '✅' : '❌'} SHORT=${filters.allowShort ? '✅' : '❌'} | ` +
+                  `${filters.reason}`;
+    }
+
     this.logger.log(
       `🚀 ОТКРЫТА ПОЗИЦИЯ ${position.side} ${signal.symbol} | ` +
       `Цена: ${currentPrice.toFixed(6)} | ` +
       `TP: ${signal.takeProfit.toFixed(6)} | ` +
       `SL: ${signal.stopLoss.toFixed(6)} | ` +
       `Канал: ${signal.channelWidth.toFixed(2)}% | ` +
-      `Комиссия: ${openFee.toFixed(2)} USDT`
+      `Комиссия: ${openFee.toFixed(2)} USDT${filterInfo}`
     );
   }
 
