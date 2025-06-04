@@ -10,6 +10,14 @@ export class VirtualTradingService {
   private readonly positions: Map<string, Position> = new Map();
   private readonly closedPositions: Position[] = [];
   private readonly activeChannels: Map<string, SidewaysPattern> = new Map(); // Активные каналы
+  private readonly lastFilterInfo: Map<string, {
+    trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+    trendStrength: number;
+    allowLong: boolean;
+    allowShort: boolean;
+    reason: string;
+    timestamp: number;
+  }> = new Map(); // Кеш последней информации о фильтрах
   private readonly takeProfitMultiplier: number;
   private readonly stopLossMultiplier: number;
   private readonly enabled: boolean;
@@ -42,10 +50,51 @@ export class VirtualTradingService {
     allowLong: boolean;
     allowShort: boolean;
     reason: string;
+    details?: {
+      emaFilter: {
+        enabled: boolean;
+        trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+        trendStrength: number;
+        passed: boolean;
+      };
+      volumeFilter: {
+        enabled: boolean;
+        currentVolume: number;
+        avgVolume: number;
+        ratio: number;
+        passed: boolean;
+      };
+      timeFilter: {
+        enabled: boolean;
+        currentHour: number;
+        isWeekend: boolean;
+        inAllowedHours: boolean;
+        passed: boolean;
+      };
+      volatilityFilter: {
+        enabled: boolean;
+        atrPercent: number;
+        minThreshold: number;
+        maxThreshold: number;
+        passed: boolean;
+      };
+    };
   }): Promise<void> {
     if (!this.enabled) return;
 
     try {
+      // Сохраняем информацию о фильтрах в кеш (преобразуем в старый формат для совместимости)
+      if (filterInfo) {
+        this.lastFilterInfo.set(pattern.symbol, {
+          trendDirection: filterInfo.trendDirection,
+          trendStrength: filterInfo.trendStrength,
+          allowLong: filterInfo.allowLong,
+          allowShort: filterInfo.allowShort,
+          reason: filterInfo.reason,
+          timestamp: Date.now(),
+        });
+      }
+
       // Сохраняем канал как активный для торговли отскоков (БЕЗ фильтров)
       this.activeChannels.set(pattern.symbol, pattern);
       
@@ -69,6 +118,35 @@ export class VirtualTradingService {
     allowLong: boolean;
     allowShort: boolean;
     reason: string;
+    details?: {
+      emaFilter: {
+        enabled: boolean;
+        trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+        trendStrength: number;
+        passed: boolean;
+      };
+      volumeFilter: {
+        enabled: boolean;
+        currentVolume: number;
+        avgVolume: number;
+        ratio: number;
+        passed: boolean;
+      };
+      timeFilter: {
+        enabled: boolean;
+        currentHour: number;
+        isWeekend: boolean;
+        inAllowedHours: boolean;
+        passed: boolean;
+      };
+      volatilityFilter: {
+        enabled: boolean;
+        atrPercent: number;
+        minThreshold: number;
+        maxThreshold: number;
+        passed: boolean;
+      };
+    };
   }): Promise<void> {
     const channel = this.activeChannels.get(symbol);
     if (!channel) return;
@@ -89,6 +167,35 @@ export class VirtualTradingService {
     allowLong: boolean;
     allowShort: boolean;
     reason: string;
+    details?: {
+      emaFilter: {
+        enabled: boolean;
+        trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+        trendStrength: number;
+        passed: boolean;
+      };
+      volumeFilter: {
+        enabled: boolean;
+        currentVolume: number;
+        avgVolume: number;
+        ratio: number;
+        passed: boolean;
+      };
+      timeFilter: {
+        enabled: boolean;
+        currentHour: number;
+        isWeekend: boolean;
+        inAllowedHours: boolean;
+        passed: boolean;
+      };
+      volatilityFilter: {
+        enabled: boolean;
+        atrPercent: number;
+        minThreshold: number;
+        maxThreshold: number;
+        passed: boolean;
+      };
+    };
   }): TradeSignal {
     // Определяем направление сделки (отскок от уровня)
     const direction = this.getTradeDirection(pattern, currentPrice);
@@ -214,13 +321,53 @@ export class VirtualTradingService {
     this.virtualBalance -= openFee;
     this.totalFeespaid += openFee;
 
-    // Формируем строку с информацией о фильтрах
+    // Формируем детальную строку с информацией о фильтрах
     let filterInfo = '';
-    if (signal.filters) {
-      const filters = signal.filters;
-      filterInfo = ` | Тренд: ${filters.trendDirection} (${filters.trendStrength.toFixed(1)}%) | ` +
-                  `LONG=${filters.allowLong ? '✅' : '❌'} SHORT=${filters.allowShort ? '✅' : '❌'} | ` +
-                  `${filters.reason}`;
+    if (signal.filters && signal.filters.details) {
+      const details = signal.filters.details;
+      const filterParts: string[] = [];
+      
+      // EMA фильтр
+      if (details.emaFilter.enabled) {
+        filterParts.push(`EMA: ${details.emaFilter.trendDirection} ${details.emaFilter.trendStrength.toFixed(1)}% ${details.emaFilter.passed ? '✅' : '❌'}`);
+      }
+      
+      // Объем фильтр
+      if (details.volumeFilter.enabled) {
+        filterParts.push(`Объем: ${details.volumeFilter.ratio.toFixed(2)}x ${details.volumeFilter.passed ? '✅' : '❌'}`);
+      }
+      
+      // Время фильтр
+      if (details.timeFilter.enabled) {
+        const timeStatus = details.timeFilter.isWeekend ? 'выходной' : 
+                          details.timeFilter.inAllowedHours ? `${details.timeFilter.currentHour}h` : `${details.timeFilter.currentHour}h⛔`;
+        filterParts.push(`Время: ${timeStatus} ${details.timeFilter.passed ? '✅' : '❌'}`);
+      }
+      
+      // Волатильность фильтр
+      if (details.volatilityFilter.enabled) {
+        filterParts.push(`Волат: ${details.volatilityFilter.atrPercent.toFixed(3)}% ${details.volatilityFilter.passed ? '✅' : '❌'}`);
+      }
+      
+      filterInfo = ` | ${filterParts.join(' | ')}`;
+      
+      // Добавляем общий результат
+      if (!signal.filters.allowLong && !signal.filters.allowShort) {
+        filterInfo += ` | ⛔ ВСЕ ЗАБЛОКИРОВАНЫ`;
+      } else if (signal.action === 'OPEN_LONG' && !signal.filters.allowLong) {
+        filterInfo += ` | ⛔ LONG БЛОКИРОВАН`;
+      } else if (signal.action === 'OPEN_SHORT' && !signal.filters.allowShort) {
+        filterInfo += ` | ⛔ SHORT БЛОКИРОВАН`;
+      } else {
+        filterInfo += ` | ✅ РАЗРЕШЕНО`;
+      }
+    } else if (signal.filters) {
+      // Fallback для старого формата
+      filterInfo = ` | Тренд: ${signal.filters.trendDirection} (${signal.filters.trendStrength.toFixed(1)}%) | ` +
+                  `LONG=${signal.filters.allowLong ? '✅' : '❌'} SHORT=${signal.filters.allowShort ? '✅' : '❌'} | ` +
+                  `${signal.filters.reason}`;
+    } else {
+      filterInfo = ' | Фильтры: нет данных';
     }
 
     this.logger.log(
@@ -251,8 +398,32 @@ export class VirtualTradingService {
     // Проверяем существующие позиции на закрытие
     await this.checkExistingPositions(kline);
     
-    // Проверяем возможность новых входов по активным каналам
-    await this.checkForTradeEntry(kline.symbol, parseFloat(kline.close));
+    // Проверяем возможность новых входов по активным каналам с кешированной информацией о фильтрах
+    const cachedFilterInfo = this.lastFilterInfo.get(kline.symbol);
+    const now = Date.now();
+    
+    // Используем кешированную информацию если она не старше 5 минут
+    if (cachedFilterInfo && (now - cachedFilterInfo.timestamp < 5 * 60 * 1000)) {
+      // Преобразуем старый формат в новый для совместимости
+      const extendedFilterInfo = {
+        ...cachedFilterInfo,
+        details: {
+          emaFilter: {
+            enabled: true,
+            trendDirection: cachedFilterInfo.trendDirection,
+            trendStrength: cachedFilterInfo.trendStrength,
+            passed: true,
+          },
+          volumeFilter: { enabled: false, currentVolume: 0, avgVolume: 0, ratio: 0, passed: true },
+          timeFilter: { enabled: false, currentHour: 0, isWeekend: false, inAllowedHours: true, passed: true },
+          volatilityFilter: { enabled: false, atrPercent: 0, minThreshold: 0, maxThreshold: 0, passed: true },
+        },
+      };
+      
+      await this.checkForTradeEntry(kline.symbol, parseFloat(kline.close), extendedFilterInfo);
+    } else {
+      await this.checkForTradeEntry(kline.symbol, parseFloat(kline.close));
+    }
   }
 
   // Проверка существующих позиций на закрытие
@@ -409,6 +580,18 @@ export class VirtualTradingService {
   // Получение общей суммы комиссий
   getTotalFeesPaid(): number {
     return this.totalFeespaid;
+  }
+
+  // Очистка старых данных фильтров (вызывается периодически)
+  cleanupOldFilterData(): void {
+    const now = Date.now();
+    const maxAge = 30 * 60 * 1000; // 30 минут
+    
+    for (const [symbol, filterData] of this.lastFilterInfo.entries()) {
+      if (now - filterData.timestamp > maxAge) {
+        this.lastFilterInfo.delete(symbol);
+      }
+    }
   }
 
   // Получение детальной торговой статистики с комиссиями

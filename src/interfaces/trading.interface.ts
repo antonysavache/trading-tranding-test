@@ -30,6 +30,35 @@ export interface TradeSignal {
     allowLong: boolean;
     allowShort: boolean;
     reason: string;
+    details?: {
+      emaFilter: {
+        enabled: boolean;
+        trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+        trendStrength: number;
+        passed: boolean;
+      };
+      volumeFilter: {
+        enabled: boolean;
+        currentVolume: number;
+        avgVolume: number;
+        ratio: number;
+        passed: boolean;
+      };
+      timeFilter: {
+        enabled: boolean;
+        currentHour: number;
+        isWeekend: boolean;
+        inAllowedHours: boolean;
+        passed: boolean;
+      };
+      volatilityFilter: {
+        enabled: boolean;
+        atrPercent: number;
+        minThreshold: number;
+        maxThreshold: number;
+        passed: boolean;
+      };
+    };
   };
 }
 

@@ -52,6 +52,37 @@ export interface MarketFilter {
   trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
   marketHours: boolean; // Хорошие ли часы для торговли
   volatility: 'LOW' | 'NORMAL' | 'HIGH';
+  
+  // Детальная информация по каждому фильтру
+  filters: {
+    emaFilter: {
+      enabled: boolean;
+      trendDirection: 'BULLISH' | 'BEARISH' | 'SIDEWAYS';
+      trendStrength: number;
+      passed: boolean;
+    };
+    volumeFilter: {
+      enabled: boolean;
+      currentVolume: number;
+      avgVolume: number;
+      ratio: number;
+      passed: boolean;
+    };
+    timeFilter: {
+      enabled: boolean;
+      currentHour: number;
+      isWeekend: boolean;
+      inAllowedHours: boolean;
+      passed: boolean;
+    };
+    volatilityFilter: {
+      enabled: boolean;
+      atrPercent: number;
+      minThreshold: number;
+      maxThreshold: number;
+      passed: boolean;
+    };
+  };
 }
 
 export interface SidewaysPatternWithFilter extends SidewaysPattern {

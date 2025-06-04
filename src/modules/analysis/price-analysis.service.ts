@@ -94,6 +94,7 @@ export class PriceAnalysisService {
           allowLong: marketFilter.allowLong,
           allowShort: marketFilter.allowShort,
           reason: marketFilter.reason,
+          details: marketFilter.filters,
         });
       } catch (error) {
         this.logger.warn(`${symbol}: Ошибка анализа фильтров: ${error.message}`);

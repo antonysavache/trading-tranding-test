@@ -67,6 +67,42 @@ export class TrendAnalysisService {
     let allowShort = true;
     let reason = 'Все фильтры пройдены';
     
+    const currentPrice = parseFloat(currentKline.close);
+    const currentVolume = parseFloat(currentKline.volume);
+    const currentHour = new Date().getUTCHours();
+    const currentDay = new Date().getUTCDay();
+    
+    // Инициализируем детальную информацию по фильтрам
+    const filterDetails = {
+      emaFilter: {
+        enabled: this.trendFilterEnabled,
+        trendDirection: trendAnalysis.direction,
+        trendStrength: trendAnalysis.strength,
+        passed: true,
+      },
+      volumeFilter: {
+        enabled: this.volumeFilterEnabled,
+        currentVolume: currentVolume,
+        avgVolume: trendAnalysis.volume,
+        ratio: currentVolume / trendAnalysis.volume,
+        passed: true,
+      },
+      timeFilter: {
+        enabled: this.timeFilterEnabled,
+        currentHour: currentHour,
+        isWeekend: currentDay === 0 || currentDay === 6,
+        inAllowedHours: this.allowedHours.includes(currentHour),
+        passed: true,
+      },
+      volatilityFilter: {
+        enabled: this.volatilityFilterEnabled,
+        atrPercent: (trendAnalysis.atr / currentPrice) * 100,
+        minThreshold: this.configService.get<number>('analysis.volatilityFilter.minAtrMultiplier', 0.3) * 0.1,
+        maxThreshold: this.configService.get<number>('analysis.volatilityFilter.maxAtrMultiplier', 3.0) * 0.1,
+        passed: true,
+      },
+    };
+    
     // 1. Фильтр тренда
     if (this.trendFilterEnabled) {
       const trendStrengthThreshold = this.configService.get<number>('analysis.trendFilter.trendStrengthThreshold', 30);
@@ -74,39 +110,40 @@ export class TrendAnalysisService {
       if (trendAnalysis.strength > trendStrengthThreshold) {
         if (trendAnalysis.direction === 'BULLISH') {
           allowShort = false;
-          reason = `Сильный восходящий тренд (${trendAnalysis.strength.toFixed(1)}%), только LONG`;
+          filterDetails.emaFilter.passed = false;
+          reason = `EMA тренд: ${trendAnalysis.direction} (${trendAnalysis.strength.toFixed(1)}%), блокирует SHORT`;
         } else if (trendAnalysis.direction === 'BEARISH') {
           allowLong = false;
-          reason = `Сильный нисходящий тренд (${trendAnalysis.strength.toFixed(1)}%), только SHORT`;
+          filterDetails.emaFilter.passed = false;
+          reason = `EMA тренд: ${trendAnalysis.direction} (${trendAnalysis.strength.toFixed(1)}%), блокирует LONG`;
         }
       }
     }
 
     // 2. Фильтр времени
     if (this.timeFilterEnabled) {
-      const currentHour = new Date().getUTCHours();
-      const currentDay = new Date().getUTCDay(); // 0 = воскресенье, 6 = суббота
-      
       if (this.excludeWeekends && (currentDay === 0 || currentDay === 6)) {
         allowLong = false;
         allowShort = false;
-        reason = 'Выходные дни - торговля отключена';
+        filterDetails.timeFilter.passed = false;
+        reason = `Время: выходной день (${currentDay === 0 ? 'воскресенье' : 'суббота'})`;
       } else if (!this.allowedHours.includes(currentHour)) {
         allowLong = false;
         allowShort = false;
-        reason = `Неподходящее время для торговли (${currentHour}:00 UTC)`;
+        filterDetails.timeFilter.passed = false;
+        reason = `Время: ${currentHour}:00 UTC не в разрешенных часах`;
       }
     }
 
     // 3. Фильтр объема
     if (this.volumeFilterEnabled) {
       const minVolumeMultiplier = this.configService.get<number>('analysis.volumeFilter.minVolumeMultiplier', 0.5);
-      const currentVolume = parseFloat(currentKline.volume);
       
       if (currentVolume < trendAnalysis.volume * minVolumeMultiplier) {
         allowLong = false;
         allowShort = false;
-        reason = 'Низкий объем торгов';
+        filterDetails.volumeFilter.passed = false;
+        reason = `Объем: ${filterDetails.volumeFilter.ratio.toFixed(2)}x от среднего (мин: ${minVolumeMultiplier}x)`;
       }
     }
 
@@ -114,20 +151,22 @@ export class TrendAnalysisService {
     if (this.volatilityFilterEnabled) {
       const minAtrMultiplier = this.configService.get<number>('analysis.volatilityFilter.minAtrMultiplier', 0.3);
       const maxAtrMultiplier = this.configService.get<number>('analysis.volatilityFilter.maxAtrMultiplier', 3.0);
-      const avgAtr = trendAnalysis.atr;
+      const atrPercent = filterDetails.volatilityFilter.atrPercent;
       
-      if (avgAtr < parseFloat(currentKline.close) * 0.001 * minAtrMultiplier) {
+      if (atrPercent < minAtrMultiplier * 0.1) {
         allowLong = false;
         allowShort = false;
-        reason = 'Слишком низкая волатильность';
-      } else if (avgAtr > parseFloat(currentKline.close) * 0.001 * maxAtrMultiplier) {
+        filterDetails.volatilityFilter.passed = false;
+        reason = `Волатильность: ${atrPercent.toFixed(3)}% слишком низкая (мин: ${(minAtrMultiplier * 0.1).toFixed(3)}%)`;
+      } else if (atrPercent > maxAtrMultiplier * 0.1) {
         allowLong = false;
         allowShort = false;
-        reason = 'Слишком высокая волатильность';
+        filterDetails.volatilityFilter.passed = false;
+        reason = `Волатильность: ${atrPercent.toFixed(3)}% слишком высокая (макс: ${(maxAtrMultiplier * 0.1).toFixed(3)}%)`;
       }
     }
 
-    const volatility = this.getVolatilityLevel(trendAnalysis.atr, parseFloat(currentKline.close));
+    const volatility = this.getVolatilityLevel(trendAnalysis.atr, currentPrice);
     const marketHours = this.isGoodMarketTime();
 
     return {
@@ -137,6 +176,7 @@ export class TrendAnalysisService {
       trendDirection: trendAnalysis.direction,
       marketHours,
       volatility,
+      filters: filterDetails,
     };
   }
 
