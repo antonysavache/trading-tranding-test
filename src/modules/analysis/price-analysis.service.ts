@@ -3,6 +3,8 @@ import { ConfigService } from '@nestjs/config';
 import { KlineData } from '../../interfaces/kline.interface';
 import { PricePoint, PriceMovement, SidewaysPattern } from '../../interfaces/analysis.interface';
 import { VirtualTradingService } from '../trading/virtual-trading.service';
+import { TrendAnalysisService } from './trend-analysis.service';
+import { FilterStatisticsService } from './filter-statistics.service';
 
 @Injectable()
 export class PriceAnalysisService {
@@ -17,7 +19,9 @@ export class PriceAnalysisService {
 
   constructor(
     private configService: ConfigService,
-    private virtualTradingService: VirtualTradingService, // Добавляем торговый сервис
+    private virtualTradingService: VirtualTradingService,
+    private trendAnalysisService: TrendAnalysisService,
+    private filterStatisticsService: FilterStatisticsService, // Добавляем сервис статистики
   ) {
     this.lookbackPeriod = this.configService.get<number>('analysis.lookbackPeriod', 3);
     this.minPriceMovement = this.configService.get<number>('analysis.minPriceMovement', 0.0005);
@@ -54,9 +58,42 @@ export class PriceAnalysisService {
     if (completedPattern) {
       patterns.push(completedPattern);
       
-      // НОВОЕ: Отправляем паттерн в торговый модуль
+      // НОВОЕ: Анализируем фильтры БЕЗ их применения (только для статистики)
       const currentPrice = parseFloat(recentKlines[recentKlines.length - 1].close);
-      await this.virtualTradingService.processPattern(completedPattern, currentPrice);
+      try {
+        const trendAnalysis = this.trendAnalysisService.analyzeTrend(recentKlines);
+        const marketFilter = this.trendAnalysisService.checkMarketFilters(symbol, trendAnalysis, recentKlines[recentKlines.length - 1]);
+        
+        // Определяем какую позицию мы собираемся открыть
+        const direction = this.getTradeDirection(completedPattern, currentPrice);
+        
+        // Записываем статистику фильтров
+        this.filterStatisticsService.recordFilterDecision(
+          symbol,
+          trendAnalysis.direction,
+          trendAnalysis.strength,
+          marketFilter.allowLong,
+          marketFilter.allowShort,
+          marketFilter.reason,
+          direction
+        );
+        
+        // Логируем что показали бы фильтры (но НЕ применяем их)
+        this.logger.log(
+          `${symbol}: 📊 ФИЛЬТРЫ (статистика) | ` +
+          `Тренд: ${trendAnalysis.direction} (${trendAnalysis.strength.toFixed(1)}%) | ` +
+          `Планируем: ${direction} | ` +
+          `Фильтр разрешил бы: LONG=${marketFilter.allowLong ? '✅' : '❌'} SHORT=${marketFilter.allowShort ? '✅' : '❌'} | ` +
+          `${marketFilter.reason}`
+        );
+        
+        // Отправляем паттерн в торговый модуль БЕЗ фильтров (как раньше)
+        await this.virtualTradingService.processPattern(completedPattern, currentPrice);
+      } catch (error) {
+        this.logger.warn(`${symbol}: Ошибка анализа фильтров: ${error.message}`);
+        // Если фильтры не работают - продолжаем торговать как раньше
+        await this.virtualTradingService.processPattern(completedPattern, currentPrice);
+      }
     }
 
     return patterns;
@@ -284,5 +321,17 @@ export class PriceAnalysisService {
 
   clearAllMovements(): void {
     this.activeMovements.clear();
+  }
+
+  // Определение направления сделки на основе паттерна (скопировано из торгового сервиса)
+  private getTradeDirection(pattern: SidewaysPattern, currentPrice: number): 'LONG' | 'SHORT' {
+    const distanceToHigh = Math.abs(currentPrice - pattern.highLevel);
+    const distanceToLow = Math.abs(currentPrice - pattern.lowLevel);
+    
+    if (distanceToHigh < distanceToLow) {
+      return 'SHORT'; // Цена у верхней границы, ожидаем отскок вниз
+    } else {
+      return 'LONG'; // Цена у нижней границы, ожидаем отскок вверх
+    }
   }
 }

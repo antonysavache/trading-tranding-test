@@ -18,7 +18,7 @@ export class AppService implements OnModuleInit {
     private dataBufferService: DataBufferService,
     private webSocketManagerService: WebSocketManagerService,
     private priceAnalysisService: PriceAnalysisService,
-    private virtualTradingService: VirtualTradingService, // Добавляем торговый сервис
+    private virtualTradingService: VirtualTradingService,
   ) {}
 
   async onModuleInit() {
@@ -31,19 +31,23 @@ export class AppService implements OnModuleInit {
   }
 
   private async initializeApplication(): Promise<void> {
-    this.logger.log('Инициализация анализатора боковиков (5-минутные свечи)...');
+    this.logger.log(
+      'Инициализация анализатора боковиков (5-минутные свечи)...',
+    );
 
     // Получаем список всех торговых пар USDT
     const tradingPairs = await this.binanceService.getTopTradingPairs();
-    this.symbols = tradingPairs.map(pair => pair.symbol);
+    this.symbols = tradingPairs.map((pair) => pair.symbol);
 
-    this.logger.log(`Анализатор запущен: отслеживается ${this.symbols.length} символов`);
+    this.logger.log(
+      `Анализатор запущен: отслеживается ${this.symbols.length} символов`,
+    );
 
     // Подписываемся на WebSocket потоки используя multi-stream подключения
     this.webSocketManagerService.subscribeToMultipleKlines(
       this.symbols,
       (kline: KlineData) => this.handleKlineData(kline),
-      (error: Error) => this.handleKlineError(error)
+      (error: Error) => this.handleKlineError(error),
     );
 
     this.isInitialized = true;
@@ -59,29 +63,39 @@ export class AppService implements OnModuleInit {
       await this.priceAnalysisService.processKlineForTrading(kline);
 
       // Логируем каждую 20-ю свечу для отслеживания активности (реже для 5m)
-      if (Math.random() < 0.05) { // 5% вероятность = примерно каждые 20 свечей
-        this.logger.debug(`📊 Обработана 5m свеча: ${kline.symbol} по цене ${parseFloat(kline.close).toFixed(4)}`);
+      if (Math.random() < 0.05) {
+        // 5% вероятность = примерно каждые 20 свечей
+        this.logger.debug(
+          `📊 Обработана 5m свеча: ${kline.symbol} по цене ${parseFloat(kline.close).toFixed(4)}`,
+        );
       }
 
       // Проверяем, достаточно ли данных для качественного анализа (для 5-минутных свечей)
-      if (!this.dataBufferService.hasEnoughData(kline.symbol, 20)) { // Нужно минимум 20 свечей (100 минут)
+      if (!this.dataBufferService.hasEnoughData(kline.symbol, 20)) {
+        // Нужно минимум 20 свечей (100 минут)
         return;
       }
 
       // Получаем свечи для анализа
       const klines = this.dataBufferService.getKlines(kline.symbol);
-      
+
       // Анализируем на предмет боковиков
       const patterns = await this.priceAnalysisService.analyzeKlines(klines);
-      
+
       // Логируем найденные боковики
       for (const pattern of patterns) {
-        const direction = pattern.direction === 'high_to_low_to_high' ? 'возврат к максимуму' : 'возврат к минимуму';
-        this.logger.log(`🔄 БОКОВИК НАЙДЕН: ${pattern.symbol} | ${direction} | Ширина: ${pattern.channelWidthPercent.toFixed(2)}%`);
+        const direction =
+          pattern.direction === 'high_to_low_to_high'
+            ? 'возврат к максимуму'
+            : 'возврат к минимуму';
+        this.logger.log(
+          `🔄 БОКОВИК НАЙДЕН: ${pattern.symbol} | ${direction} | Ширина: ${pattern.channelWidthPercent.toFixed(2)}%`,
+        );
       }
-
     } catch (error) {
-      this.logger.error(`Ошибка обработки kline для ${kline.symbol}: ${error.message}`);
+      this.logger.error(
+        `Ошибка обработки kline для ${kline.symbol}: ${error.message}`,
+      );
     }
   }
 
@@ -95,15 +109,15 @@ export class AppService implements OnModuleInit {
     const activeMovements = this.priceAnalysisService.getActiveMovements();
     const bufferStats = this.dataBufferService.getBufferStats();
     const tradingStats = this.virtualTradingService.getTradingStats();
-    
+
     // Логируем общую статистику включая торговлю
     this.logger.log(
       `📊 АКТИВНОСТЬ: Движений в процессе: ${activeMovements.size} | ` +
-      `Активных позиций: ${tradingStats.activePosсitions} | ` +
-      `Всего сделок: ${tradingStats.totalTrades} | ` +
-      `Баланс: ${this.virtualTradingService.getVirtualBalance().toFixed(2)} USDT`
+        `Активных позиций: ${tradingStats.activePosсitions} | ` +
+        `Всего сделок: ${tradingStats.totalTrades} | ` +
+        `Баланс: ${this.virtualTradingService.getVirtualBalance().toFixed(2)} USDT`,
     );
-    
+
     // Если есть активные движения, показываем детали
     if (activeMovements.size > 0) {
       const details: string[] = [];
@@ -113,13 +127,13 @@ export class AppService implements OnModuleInit {
         const status = movement.status;
         details.push(`${symbol}(${pointsCount}точек,${status})`);
       }
-      
+
       // Показываем только первые 10, чтобы не спамить
       const displayDetails = details.slice(0, 10);
       if (details.length > 10) {
         displayDetails.push(`...и еще ${details.length - 10}`);
       }
-      
+
       this.logger.log(`🔍 Активные движения: ${displayDetails.join(', ')}`);
     }
   }
@@ -135,30 +149,30 @@ export class AppService implements OnModuleInit {
   // НОВОЕ: Логирование торговой статистики каждую минуту
   private logTradingStatistics(): void {
     const detailedStats = this.virtualTradingService.getDetailedTradingStats();
-    
+
     if (detailedStats.totalTrades > 0 || detailedStats.activePosсitions > 0) {
       this.logger.log(
         `💰 ТОРГОВАЯ СТАТИСТИКА (1 мин) | ` +
-        `Баланс: ${detailedStats.balance.toFixed(2)} USDT | ` +
-        `Дневной PnL: ${detailedStats.dailyPnl >= 0 ? '+' : ''}${detailedStats.dailyPnl.toFixed(2)} USDT | ` +
-        `Дневной ROI: ${detailedStats.dailyROI >= 0 ? '+' : ''}${detailedStats.dailyROI.toFixed(2)}% | ` +
-        `Общий ROI: ${detailedStats.totalROI >= 0 ? '+' : ''}${detailedStats.totalROI.toFixed(2)}%`
+          `Баланс: ${detailedStats.balance.toFixed(2)} USDT | ` +
+          `Дневной PnL: ${detailedStats.dailyPnl >= 0 ? '+' : ''}${detailedStats.dailyPnl.toFixed(2)} USDT | ` +
+          `Дневной ROI: ${detailedStats.dailyROI >= 0 ? '+' : ''}${detailedStats.dailyROI.toFixed(2)}% | ` +
+          `Общий ROI: ${detailedStats.totalROI >= 0 ? '+' : ''}${detailedStats.totalROI.toFixed(2)}%`,
       );
-      
+
       this.logger.log(
         `📊 ДЕТАЛИ | ` +
-        `Сделок: ${detailedStats.totalTrades} | ` +
-        `Активных: ${detailedStats.activePosсitions} | ` +
-        `Винрейт: ${detailedStats.winRate.toFixed(1)}% | ` +
-        `Комиссии: ${detailedStats.totalFees.toFixed(2)} USDT | ` +
-        `Чистый PnL: ${detailedStats.netPnl >= 0 ? '+' : ''}${detailedStats.netPnl.toFixed(2)} USDT`
+          `Сделок: ${detailedStats.totalTrades} | ` +
+          `Активных: ${detailedStats.activePosсitions} | ` +
+          `Винрейт: ${detailedStats.winRate.toFixed(1)}% | ` +
+          `Комиссии: ${detailedStats.totalFees.toFixed(2)} USDT | ` +
+          `Чистый PnL: ${detailedStats.netPnl >= 0 ? '+' : ''}${detailedStats.netPnl.toFixed(2)} USDT`,
       );
     } else {
       // Если еще нет сделок, показываем только баланс
       this.logger.log(
         `💰 ТОРГОВАЯ СТАТИСТИКА | ` +
-        `Баланс: ${detailedStats.balance.toFixed(2)} USDT | ` +
-        `Ожидание первых сделок...`
+          `Баланс: ${detailedStats.balance.toFixed(2)} USDT | ` +
+          `Ожидание первых сделок...`,
       );
     }
   }
@@ -166,38 +180,43 @@ export class AppService implements OnModuleInit {
   @Cron(CronExpression.EVERY_5_MINUTES)
   handleTradingStatistics(): void {
     if (this.isInitialized) {
-      const detailedStats = this.virtualTradingService.getDetailedTradingStats();
+      const detailedStats =
+        this.virtualTradingService.getDetailedTradingStats();
       const activePositions = this.virtualTradingService.getActivePositions();
-      
+
       if (detailedStats.totalTrades > 0) {
         this.logger.log(
           `📈 РАСШИРЕННАЯ СТАТИСТИКА (5 мин) | ` +
-          `Всего сделок: ${detailedStats.totalTrades} | ` +
-          `Выигрышных: ${detailedStats.winningTrades} | ` +
-          `Проигрышных: ${detailedStats.losingTrades} | ` +
-          `Винрейт: ${detailedStats.winRate.toFixed(1)}%`
+            `Всего сделок: ${detailedStats.totalTrades} | ` +
+            `Выигрышных: ${detailedStats.winningTrades} | ` +
+            `Проигрышных: ${detailedStats.losingTrades} | ` +
+            `Винрейт: ${detailedStats.winRate.toFixed(1)}%`,
         );
-        
+
         this.logger.log(
           `💵 ФИНАНСОВЫЕ ПОКАЗАТЕЛИ | ` +
-          `Средний выигрыш: ${detailedStats.averageWin.toFixed(2)} USDT | ` +
-          `Средний проигрыш: ${detailedStats.averageLoss.toFixed(2)} USDT | ` +
-          `Профит-фактор: ${detailedStats.profitFactor.toFixed(2)} | ` +
-          `Общие комиссии: ${detailedStats.totalFees.toFixed(2)} USDT`
+            `Средний выигрыш: ${detailedStats.averageWin.toFixed(2)} USDT | ` +
+            `Средний проигрыш: ${detailedStats.averageLoss.toFixed(2)} USDT | ` +
+            `Профит-фактор: ${detailedStats.profitFactor.toFixed(2)} | ` +
+            `Общие комиссии: ${detailedStats.totalFees.toFixed(2)} USDT`,
         );
       }
+
+
 
       // Показываем активные позиции если есть
       if (activePositions.length > 0) {
         const positionsList = activePositions
           .slice(0, 5) // Показываем только первые 5
-          .map(pos => `${pos.symbol}(${pos.side})`)
+          .map((pos) => `${pos.symbol}(${pos.side})`)
           .join(', ');
-        
+
         this.logger.log(
           `🔥 АКТИВНЫЕ ПОЗИЦИИ (${activePositions.length}): ${positionsList}${
-            activePositions.length > 5 ? `...и еще ${activePositions.length - 5}` : ''
-          }`
+            activePositions.length > 5
+              ? `...и еще ${activePositions.length - 5}`
+              : ''
+          }`,
         );
       }
     }
@@ -208,8 +227,10 @@ export class AppService implements OnModuleInit {
     if (this.isInitialized) {
       const activeMovements = this.priceAnalysisService.getActiveMovements();
       const balance = this.virtualTradingService.getVirtualBalance();
-      
-      this.logger.log(`💊 ЗДОРОВЬЕ: Движений: ${activeMovements.size} | Баланс: ${balance.toFixed(2)} USDT`);
+
+      this.logger.log(
+        `💊 ЗДОРОВЬЕ: Движений: ${activeMovements.size} | Баланс: ${balance.toFixed(2)} USDT`,
+      );
     }
   }
 
@@ -221,7 +242,7 @@ export class AppService implements OnModuleInit {
     const activeMovements = this.priceAnalysisService.getActiveMovements();
     const tradingStats = this.virtualTradingService.getTradingStats();
     const activePositions = this.virtualTradingService.getActivePositions();
-    
+
     return {
       initialized: this.isInitialized,
       trackedSymbols: this.symbols.length,
@@ -243,7 +264,7 @@ export class AppService implements OnModuleInit {
     return this.virtualTradingService.getTradingStats();
   }
 
-  // НОВОЕ: Метод для получения активных позиций  
+  // НОВОЕ: Метод для получения активных позиций
   getActivePositions() {
     return this.virtualTradingService.getActivePositions();
   }

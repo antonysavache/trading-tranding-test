@@ -40,7 +40,7 @@ export class VirtualTradingService {
     if (!this.enabled) return;
 
     try {
-      // Сохраняем канал как активный для торговли отскоков
+      // Сохраняем канал как активный для торговли отскоков (БЕЗ фильтров)
       this.activeChannels.set(pattern.symbol, pattern);
       
       this.logger.log(
@@ -64,6 +64,8 @@ export class VirtualTradingService {
     // Проверяем, что цена достаточно близко к границе канала для входа
     if (this.isNearChannelBoundary(channel, currentPrice)) {
       const signal = this.createTradeSignal(channel, currentPrice);
+      
+      // Входим БЕЗ проверки фильтров (фильтры только для статистики)
       await this.executeSignal(signal, currentPrice);
     }
   }
@@ -81,22 +83,28 @@ export class VirtualTradingService {
     
     if (direction === 'LONG') {
       // LONG от нижней границы: 
-      // TP = к верхней границе с коэффициентом
-      // SL = ниже нижней границы с коэффициентом
-      const targetMove = channelHeight * this.takeProfitMultiplier;
-      const stopMove = channelHeight * this.stopLossMultiplier;
+      // TP = текущая цена + процент от высоты канала
+      // SL = текущая цена - процент от высоты канала
+      const tpDistance = channelHeight * this.takeProfitMultiplier;
+      const slDistance = channelHeight * this.stopLossMultiplier;
       
-      takeProfit = currentPrice + targetMove;
-      stopLoss = currentPrice - stopMove;
+      takeProfit = currentPrice + tpDistance;
+      stopLoss = currentPrice - slDistance;
+      
+      // Ограничиваем TP верхней границей канала
+      takeProfit = Math.min(takeProfit, pattern.highLevel);
     } else {
       // SHORT от верхней границы:
-      // TP = к нижней границе с коэффициентом  
-      // SL = выше верхней границы с коэффициентом
-      const targetMove = channelHeight * this.takeProfitMultiplier;
-      const stopMove = channelHeight * this.stopLossMultiplier;
+      // TP = текущая цена - процент от высоты канала
+      // SL = текущая цена + процент от высоты канала
+      const tpDistance = channelHeight * this.takeProfitMultiplier;
+      const slDistance = channelHeight * this.stopLossMultiplier;
       
-      takeProfit = currentPrice - targetMove;
-      stopLoss = currentPrice + stopMove;
+      takeProfit = currentPrice - tpDistance;
+      stopLoss = currentPrice + slDistance;
+      
+      // Ограничиваем TP нижней границей канала
+      takeProfit = Math.max(takeProfit, pattern.lowLevel);
     }
 
     return {
@@ -130,7 +138,7 @@ export class VirtualTradingService {
   // Проверка, находится ли цена достаточно близко к границе канала
   private isNearChannelBoundary(pattern: SidewaysPattern, currentPrice: number): boolean {
     const channelHeight = pattern.highLevel - pattern.lowLevel;
-    const threshold = channelHeight * 0.05; // 5% от высоты канала (строже для 5m)
+    const threshold = channelHeight * 0.15; // Увеличиваем до 15% от высоты канала
     
     // Проверяем близость к верхней или нижней границе
     const distanceToHigh = Math.abs(currentPrice - pattern.highLevel);
